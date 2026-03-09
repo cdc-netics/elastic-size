@@ -1,0 +1,1422 @@
+<mat-sidenav-container class="layout">
+  <mat-sidenav class="sidebar" [mode]="isCompact() ? 'over' : 'side'" [opened]="isCompact() ? sidebarOpened() : true">
+    <div class="sidebar-content">
+      <h1>Elastic Sizing Next</h1>
+      <p class="subtext">Capacity planning Elasticsearch/OpenSearch 2026</p>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Escenario activo</mat-label>
+        <mat-select [ngModel]="selectedScenarioId()" (ngModelChange)="setSelectedScenario($event)">
+          @for (scenario of scenarios(); track scenario.id) {
+            <mat-option [value]="scenario.id">{{ scenario.name }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+
+      <div class="row-actions">
+        <button mat-flat-button type="button" (click)="addScenario()">Agregar scenario</button>
+        <button mat-stroked-button type="button" (click)="duplicateScenario()">Duplicar scenario</button>
+      </div>
+
+      @if (selectedScenario(); as scenario) {
+        <mat-divider></mat-divider>
+
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Nombre</mat-label>
+          <input
+            matInput
+            [ngModel]="scenario.name"
+            (ngModelChange)="scenario.name = $event; markDirty()"
+          />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Modo</mat-label>
+          <mat-select [ngModel]="scenario.mode" (ngModelChange)="updateMode($event)">
+            <mat-option value="study">Modo Estudio</mat-option>
+            <mat-option value="production">Modo Producción</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <h3 class="section-title">Infraestructura (oferta)</h3>
+        <div class="mini-grid two-col">
+          <mat-form-field appearance="outline">
+            <mat-label>Cantidad de clusters</mat-label>
+            <input
+              matInput
+              type="number"
+              min="1"
+              step="1"
+              [ngModel]="scenario.deployment.clusterCount"
+              (ngModelChange)="scenario.deployment.clusterCount = +$event; updateDeployment(scenario)"
+            />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Nodos por cluster (fijo)</mat-label>
+            <input
+              matInput
+              type="number"
+              min="1"
+              step="1"
+              [ngModel]="scenario.deployment.fixedDataNodesPerCluster"
+              (ngModelChange)="scenario.deployment.fixedDataNodesPerCluster = +$event; updateDeployment(scenario)"
+            />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Carga entre clusters</mat-label>
+            <mat-select [ngModel]="scenario.deployment.clusterLoadMode" (ngModelChange)="scenario.deployment.clusterLoadMode = $event; updateDeployment(scenario)">
+              <mat-option value="split">Repartida (mismo total)</mat-option>
+              <mat-option value="duplicate">Duplicada (cada cluster recibe todo)</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+        <p class="field-hint">
+          Total nodos data = clusters x nodos por cluster.
+          En "Repartida", subir clusters aumenta capacidad sin aumentar demanda total.
+          Valores menores a 1 se corrigen automáticamente a 1.
+        </p>
+
+        <div class="mini-grid two-col">
+          <mat-form-field appearance="outline">
+            <mat-label>Disponibilidad</mat-label>
+            <mat-select [ngModel]="scenario.clusterPlan.availabilityProfile ?? 'standard'" (ngModelChange)="updateAvailabilityProfile(scenario, $event)">
+              <mat-option value="lab">Lab</mat-option>
+              <mat-option value="standard">Standard</mat-option>
+              <mat-option value="critical">Critical</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Perfil de consulta</mat-label>
+            <mat-select [ngModel]="scenario.clusterPlan.queryProfile ?? 'medium'" (ngModelChange)="updateQueryProfile(scenario, $event)">
+              <mat-option value="low">Low</mat-option>
+              <mat-option value="medium">Medium</mat-option>
+              <mat-option value="high">High</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        @if (uiMode() === 'advanced') {
+          <h3 class="section-title">Node Sizing por Tier</h3>
+          <p class="field-hint strong node-architecture-note">
+            “Nodos en warm/cold/frozen no se calculan por igualar hot. Se dimensionan por consultas históricas, caché y latencia al repositorio. En modo simple debes definirlos manualmente.”
+          </p>
+
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Modo de nodos por tier</mat-label>
+            <mat-select [ngModel]="scenario.nodeSizing.mode" (ngModelChange)="updateNodeSizingMode(scenario, $event)">
+              <mat-option value="manual">Simple (manual por tier)</mat-option>
+              <mat-option value="auto">Auto Nodes (avanzado por shards/tier)</mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          @if (scenario.nodeSizing.mode === 'manual') {
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Cuando falta valor manual</mat-label>
+              <mat-select [ngModel]="scenario.nodeSizing.applySuggestedDefaultsWhenMissing" (ngModelChange)="updateNodeSizingDefaultsToggle(scenario, $event)">
+                <mat-option [value]="true">Aplicar defaults sugeridos</mat-option>
+                <mat-option [value]="false">Exigir input manual</mat-option>
+              </mat-select>
+            </mat-form-field>
+
+            <div class="mini-grid two-col">
+              @for (tier of tiers; track tier) {
+                <mat-form-field appearance="outline">
+                  <mat-label>{{ tierLabel(tier) }} nodes (manual)</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    min="1"
+                    max="1000"
+                    step="1"
+                    [ngModel]="manualTierNodeValue(scenario, tier)"
+                    [placeholder]="'Sugerido: ' + manualTierNodeSuggestion(scenario, tier)"
+                    (ngModelChange)="updateManualTierNodes(scenario, tier, $event)"
+                  />
+                </mat-form-field>
+              }
+            </div>
+          } @else {
+            <div class="mini-grid two-col">
+              @for (tier of tiers; track tier) {
+                <mat-form-field appearance="outline">
+                  <mat-label>{{ tierLabel(tier) }} target shards/nodo</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    [attr.min]="tier === 'frozen' ? 150 : 1"
+                    [attr.max]="tier === 'frozen' ? 300 : 500"
+                    step="1"
+                    [ngModel]="scenario.nodeSizing.autoTargetShardsPerNodeByTier[tier]"
+                    (ngModelChange)="updateAutoTargetShardsPerNode(scenario, tier, $event)"
+                  />
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>{{ tierLabel(tier) }} cap nodos</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    min="1"
+                    max="1000"
+                    step="1"
+                    [ngModel]="scenario.nodeSizing.autoNodesCapByTier[tier]"
+                    (ngModelChange)="updateAutoNodesCap(scenario, tier, $event)"
+                  />
+                </mat-form-field>
+              }
+            </div>
+          }
+        }
+
+        <h3 class="section-title">Cluster (Base)</h3>
+        <p class="field-hint strong">Arquitectura base del cluster (sin containers).</p>
+        <p class="field-hint">
+          EPS y tamaño de evento se definen en <strong>Workloads/Datasets</strong>.
+          Aquí se muestra arquitectura base (shards, tiers, nodos), sin duplicar entradas.
+        </p>
+        @if (selectedResult(); as clusterResult) {
+          <p class="field-hint">Ingesta total actual desde Workloads: <strong>{{ formatCount(clusterResult.totals.totalEps) }} EPS</strong>.</p>
+        }
+        <p class="field-hint">
+          El detalle por tier (Hot/Warm/Cold/Frozen), nodos y compresión se ve en las pestañas de resultados.
+        </p>
+
+        @if (uiMode() === 'advanced') {
+          <h3 class="section-title">Archivado/Compresión</h3>
+          <div class="mini-grid two-col">
+            <mat-form-field appearance="outline">
+              <mat-label>Aplicar al sizing principal</mat-label>
+              <mat-select [ngModel]="scenario.archiveCompression.includeInSizing" (ngModelChange)="scenario.archiveCompression.includeInSizing = $event; updateArchiveCompression(scenario)">
+                <mat-option [value]="true">Sí (impacta sizing)</mat-option>
+                <mat-option [value]="false">No (solo referencia)</mat-option>
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>EPS archivo</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.archiveCompression.eps"
+                (ngModelChange)="scenario.archiveCompression.eps = +$event; updateArchiveCompression(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Avg event bytes</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.archiveCompression.avgEventBytes"
+                (ngModelChange)="scenario.archiveCompression.avgEventBytes = +$event; updateArchiveCompression(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Días online (hot)</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.archiveCompression.retentionHotDays"
+                (ngModelChange)="scenario.archiveCompression.retentionHotDays = +$event; updateArchiveCompression(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Días archivados</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.archiveCompression.retentionArchivedDays"
+                (ngModelChange)="scenario.archiveCompression.retentionArchivedDays = +$event; updateArchiveCompression(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Modo</mat-label>
+              <mat-select [ngModel]="scenario.archiveCompression.mode" (ngModelChange)="scenario.archiveCompression.mode = $event; updateArchiveCompression(scenario)">
+                <mat-option value="raw_to_archive">raw → archive</mat-option>
+                <mat-option value="indexed_to_archive">indexed → archive</mat-option>
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Compression factor</mat-label>
+              <input
+                matInput
+                type="number"
+                step="0.01"
+                [ngModel]="scenario.archiveCompression.compressionFactor"
+                (ngModelChange)="scenario.archiveCompression.compressionFactor = +$event; updateArchiveCompression(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Index overhead factor</mat-label>
+              <input
+                matInput
+                type="number"
+                step="0.01"
+                [ngModel]="scenario.archiveCompression.indexOverheadFactor"
+                (ngModelChange)="scenario.archiveCompression.indexOverheadFactor = +$event; updateArchiveCompression(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Unidad</mat-label>
+              <mat-select [ngModel]="scenario.archiveCompression.unitSystem" (ngModelChange)="scenario.archiveCompression.unitSystem = $event; updateArchiveCompression(scenario)">
+                <mat-option value="GB10">GB (10^9)</mat-option>
+                <mat-option value="GiB2">GiB (2^30)</mat-option>
+              </mat-select>
+            </mat-form-field>
+          </div>
+
+          <div class="mini-grid two-col">
+            <mat-form-field appearance="outline">
+              <mat-label>Modo shards</mat-label>
+              <mat-select [ngModel]="scenario.manualShardPlan.enabled" (ngModelChange)="scenario.manualShardPlan.enabled = $event; updateManualShardPlan(scenario)">
+                <mat-option [value]="false">Auto</mat-option>
+                <mat-option [value]="true">Manual</mat-option>
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Shards primarios por cluster (#)</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.manualShardPlan.primaryShardsPerCluster"
+                (ngModelChange)="scenario.manualShardPlan.primaryShardsPerCluster = +$event; updateManualShardPlan(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Réplicas por shard (#)</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.manualShardPlan.replicasPerPrimary"
+                (ngModelChange)="scenario.manualShardPlan.replicasPerPrimary = +$event; updateManualShardPlan(scenario)"
+              />
+            </mat-form-field>
+          </div>
+
+          <div class="mini-grid">
+            <mat-form-field appearance="outline">
+              <mat-label>Index overhead</mat-label>
+              <input
+                matInput
+                type="number"
+                step="0.01"
+                [ngModel]="scenario.overhead.indexOverheadFactor"
+                (ngModelChange)="scenario.overhead.indexOverheadFactor = +$event; markDirty()"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Headroom</mat-label>
+              <input
+                matInput
+                type="number"
+                step="0.01"
+                [ngModel]="scenario.overhead.headroomFactor"
+                (ngModelChange)="scenario.overhead.headroomFactor = +$event; markDirty()"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Disk usable</mat-label>
+              <input
+                matInput
+                type="number"
+                step="0.01"
+                [ngModel]="scenario.overhead.diskUsableFactor"
+                (ngModelChange)="scenario.overhead.diskUsableFactor = +$event; markDirty()"
+              />
+            </mat-form-field>
+          </div>
+        }
+
+        <h3 class="section-title">Spec de Máquina</h3>
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Qué quiero calcular</mat-label>
+          <mat-select [ngModel]="scenario.sizingApproach" (ngModelChange)="updateSizingApproach(scenario, $event)">
+            <mat-option value="normal">Cluster recomendado (por workload)</mat-option>
+            <mat-option value="machine_requirements">Qué cabe en mi máquina / Docker</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        @if (scenario.sizingApproach === 'machine_requirements') {
+          <div class="mini-grid two-col">
+            <mat-form-field appearance="outline">
+              <mat-label>Host target</mat-label>
+              <mat-select [ngModel]="hostTargetForScenario(scenario)" (ngModelChange)="setHostTarget(scenario, $event)">
+                <mat-option value="cluster_dedicado">Cluster dedicado</mat-option>
+                <mat-option value="single_host">Single host</mat-option>
+                <mat-option value="docker_limits">Docker limits</mat-option>
+                <mat-option value="vm">VM</mat-option>
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Comparar con workload actual</mat-label>
+              <mat-select [ngModel]="scenario.capacityCheck.compareAgainstWorkload !== false" (ngModelChange)="setCompareAgainstWorkload(scenario, $event)">
+                <mat-option [value]="true">Sí</mat-option>
+                <mat-option [value]="false">No (solo capacidad máxima)</mat-option>
+              </mat-select>
+            </mat-form-field>
+          </div>
+
+          <div class="mini-grid two-col">
+            <mat-form-field appearance="outline">
+              <mat-label>CPU cores por nodo</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.capacityCheck.machineCpuCores"
+                (ngModelChange)="scenario.capacityCheck.machineCpuCores = +$event; updateMachineProfile(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>RAM por nodo (GB)</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.capacityCheck.machineRamGb"
+                (ngModelChange)="scenario.capacityCheck.machineRamGb = +$event; updateMachineProfile(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Disco usable por nodo (GB)</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.capacityCheck.machineDiskGbUsable"
+                (ngModelChange)="scenario.capacityCheck.machineDiskGbUsable = +$event; updateMachineProfile(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Headroom (%)</mat-label>
+              <input
+                matInput
+                type="number"
+                step="1"
+                [ngModel]="scenario.capacityCheck.headroomPct"
+                (ngModelChange)="scenario.capacityCheck.headroomPct = +$event; updateMachineProfile(scenario)"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Tipo de disco</mat-label>
+              <mat-select [ngModel]="scenario.machineProfile.diskType" (ngModelChange)="scenario.machineProfile.diskType = $event; updateMachineProfile(scenario)">
+                <mat-option value="ssd">SSD</mat-option>
+                <mat-option value="hdd">HDD</mat-option>
+              </mat-select>
+            </mat-form-field>
+          </div>
+
+          @if (hostTargetForScenario(scenario) === 'docker_limits') {
+            <p class="field-hint">Especifica servicios dockerizados para validar overhead.</p>
+            <div class="mini-grid two-col">
+              <mat-form-field appearance="outline">
+                <mat-label>{{ deploymentServiceLabel(scenario, 'kibana') }}</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  step="1"
+                  [ngModel]="scenario.deploymentPlan.services.kibanaCount"
+                  (ngModelChange)="scenario.deploymentPlan.services.kibanaCount = +$event; updateDeploymentPlan(scenario)"
+                />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>{{ deploymentServiceLabel(scenario, 'logstash') }}</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  step="1"
+                  [ngModel]="scenario.deploymentPlan.services.logstashCount"
+                  (ngModelChange)="scenario.deploymentPlan.services.logstashCount = +$event; updateDeploymentPlan(scenario)"
+                />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>{{ deploymentServiceLabel(scenario, 'apm') }}</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  step="1"
+                  [ngModel]="scenario.deploymentPlan.services.apmCount"
+                  (ngModelChange)="scenario.deploymentPlan.services.apmCount = +$event; updateDeploymentPlan(scenario)"
+                />
+              </mat-form-field>
+            </div>
+          }
+        } @else {
+          <p class="field-hint">En este modo el motor entrega topología y recursos recomendados a partir del workload.</p>
+        }
+
+        @if (scenario.sizingApproach === 'normal' || scenario.capacityCheck.compareAgainstWorkload !== false) {
+          <h2>Workloads (demanda)</h2>
+          <p class="field-hint strong">
+            Lo que configuras aquí alimenta directamente las pestañas Resumen, Tiers y Nodos.
+            Clusters/nodos arriba definen capacidad disponible; Workloads definen demanda.
+          </p>
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Modo de edición de demanda</mat-label>
+            <mat-select [ngModel]="uiMode()" (ngModelChange)="setUiMode($event)">
+              <mat-option value="simple">Simple (solo retención por tier)</mat-option>
+              <mat-option value="advanced">Avanzado (réplicas, shard y rollover)</mat-option>
+            </mat-select>
+          </mat-form-field>
+          @if (uiMode() === 'simple') {
+            <p class="field-hint">
+              En modo simple editas solo días de retención. Hot = más rápido, Warm = intermedio,
+              Cold/Frozen = más comprimido y más lento de consultar.
+            </p>
+            <div class="mini-grid two-col">
+              <mat-form-field appearance="outline">
+                <mat-label>Shards en modo simple</mat-label>
+                <mat-select [ngModel]="scenario.manualShardPlan.enabled" (ngModelChange)="scenario.manualShardPlan.enabled = $event; updateManualShardPlan(scenario)">
+                  <mat-option [value]="false">Auto (por tamaño/retención)</mat-option>
+                  <mat-option [value]="true">Manual (por cluster)</mat-option>
+                </mat-select>
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Archivado en cálculo</mat-label>
+                <mat-select [ngModel]="scenario.archiveCompression.includeInSizing" (ngModelChange)="scenario.archiveCompression.includeInSizing = $event; updateArchiveCompression(scenario)">
+                  <mat-option [value]="false">No</mat-option>
+                  <mat-option [value]="true">Sí</mat-option>
+                </mat-select>
+              </mat-form-field>
+            </div>
+            @if (scenario.manualShardPlan.enabled) {
+              <div class="mini-grid two-col">
+                <mat-form-field appearance="outline">
+                  <mat-label>Primarios por cluster</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    step="1"
+                    [ngModel]="scenario.manualShardPlan.primaryShardsPerCluster"
+                    (ngModelChange)="scenario.manualShardPlan.primaryShardsPerCluster = +$event; updateManualShardPlan(scenario)"
+                  />
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>Réplicas por primario</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    step="1"
+                    [ngModel]="scenario.manualShardPlan.replicasPerPrimary"
+                    (ngModelChange)="scenario.manualShardPlan.replicasPerPrimary = +$event; updateManualShardPlan(scenario)"
+                  />
+                </mat-form-field>
+              </div>
+            }
+            @if (scenario.archiveCompression.includeInSizing) {
+              <div class="mini-grid two-col">
+                <mat-form-field appearance="outline">
+                  <mat-label>EPS archivado</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    step="1"
+                    [ngModel]="scenario.archiveCompression.eps"
+                    (ngModelChange)="scenario.archiveCompression.eps = +$event; updateArchiveCompression(scenario)"
+                  />
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>Días archivados</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    step="1"
+                    [ngModel]="scenario.archiveCompression.retentionArchivedDays"
+                    (ngModelChange)="scenario.archiveCompression.retentionArchivedDays = +$event; updateArchiveCompression(scenario)"
+                  />
+                </mat-form-field>
+              </div>
+            }
+            <div class="mini-grid two-col">
+              <mat-form-field appearance="outline">
+                <mat-label>Frozen nodes (manual)</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="1"
+                  max="1000"
+                  step="1"
+                  [ngModel]="manualTierNodeValue(scenario, 'frozen')"
+                  [placeholder]="'Sugerido: ' + manualTierNodeSuggestion(scenario, 'frozen')"
+                  (ngModelChange)="updateManualTierNodes(scenario, 'frozen', $event)"
+                />
+              </mat-form-field>
+            </div>
+            <p class="field-hint">
+              Frozen en simple usa este valor manual y no se autoescala por shards.
+            </p>
+          }
+          <p class="field-hint">
+            <strong>Rollover</strong> = cada cuántos días se crea un índice nuevo. <strong>Shard objetivo</strong> = tamaño ideal por shard.
+            En <strong>Frozen</strong>, esta calculadora asume snapshots (réplicas 0) y menor storage local.
+          </p>
+          <button mat-stroked-button type="button" (click)="addWorkload()">Agregar workload</button>
+
+          <div class="workloads">
+            @for (workload of scenario.workloads; track workload.id) {
+              <mat-card class="workload-card">
+              <div class="workload-header">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Workload</mat-label>
+                  <input
+                    matInput
+                    [ngModel]="workload.name"
+                    (ngModelChange)="workload.name = $event; markDirty()"
+                  />
+                </mat-form-field>
+                <button mat-button type="button" (click)="removeWorkload(workload.id)">Quitar</button>
+              </div>
+
+              <div class="row-actions compact">
+                <button mat-stroked-button type="button" (click)="addDataset(workload, 'logs')">+ Dataset</button>
+              </div>
+
+              @for (dataset of workload.datasets; track dataset.id) {
+                <mat-card class="dataset-card">
+                  <div class="dataset-head">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Dataset</mat-label>
+                      <input
+                        matInput
+                        [ngModel]="dataset.name"
+                        (ngModelChange)="dataset.name = $event; markDirty()"
+                      />
+                    </mat-form-field>
+                    <button mat-button type="button" (click)="removeDataset(workload, dataset.id)">Quitar</button>
+                  </div>
+
+                  <div class="mini-grid two-col">
+                    <div class="field-block">
+                      <p class="field-caption">Tipo dataset</p>
+                      <mat-form-field appearance="outline">
+                        <mat-select
+                          [ngModel]="dataset.kind"
+                          (ngModelChange)="dataset.kind = $event; applyPreset(dataset, $event)"
+                        >
+                          @for (kind of presetKinds; track kind) {
+                            <mat-option [value]="kind">{{ kind }}</mat-option>
+                          }
+                        </mat-select>
+                      </mat-form-field>
+                    </div>
+
+                    <div class="field-block">
+                      <p class="field-caption">Unidad ingest</p>
+                      <mat-form-field appearance="outline">
+                        <mat-select
+                          [ngModel]="dataset.ingest.mode"
+                          (ngModelChange)="onIngestModeChange(dataset, $event)"
+                        >
+                          <mat-option value="gb_per_hour">GB/hora</mat-option>
+                          <mat-option value="gb_per_day">GB/día</mat-option>
+                          <mat-option value="eps_plus_avg_event_bytes">EPS + bytes</mat-option>
+                        </mat-select>
+                      </mat-form-field>
+                    </div>
+                  </div>
+
+                  @if (dataset.ingest.mode === 'gb_per_hour') {
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Ingesta (GB/hora)</mat-label>
+                      <input
+                        matInput
+                        type="number"
+                        step="0.1"
+                        [ngModel]="dataset.ingest.gbPerHour"
+                        (ngModelChange)="dataset.ingest.gbPerHour = +$event; markDirty()"
+                      />
+                    </mat-form-field>
+                  }
+
+                  @if (dataset.ingest.mode === 'gb_per_day') {
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Ingesta (GB/día)</mat-label>
+                      <input
+                        matInput
+                        type="number"
+                        step="0.1"
+                        [ngModel]="dataset.ingest.gbPerDay"
+                        (ngModelChange)="dataset.ingest.gbPerDay = +$event; markDirty()"
+                      />
+                    </mat-form-field>
+                  }
+
+                  @if (dataset.ingest.mode === 'eps_plus_avg_event_bytes') {
+                    <div class="mini-grid two-col">
+                      <div class="field-block">
+                        <p class="field-caption">Eventos/seg (EPS)</p>
+                        <mat-form-field appearance="outline">
+                          <input
+                            matInput
+                            type="number"
+                            step="1"
+                            [ngModel]="dataset.ingest.eps"
+                            (ngModelChange)="dataset.ingest.eps = +$event; markDirty()"
+                          />
+                        </mat-form-field>
+                      </div>
+
+                      <div class="field-block">
+                        <p class="field-caption">Tamaño evento (bytes)</p>
+                        <mat-form-field appearance="outline">
+                          <input
+                            matInput
+                            type="number"
+                            step="1"
+                            [ngModel]="dataset.ingest.avgEventBytes"
+                            (ngModelChange)="dataset.ingest.avgEventBytes = +$event; markDirty()"
+                          />
+                        </mat-form-field>
+                      </div>
+                    </div>
+                  }
+
+                  <div class="tiers-panel">
+                    @if (uiMode() === 'advanced') {
+                      <p class="tier-help">
+                        Valores por tier: <strong>Retención</strong> en días, <strong>Réplicas</strong> cantidad de copias,
+                        <strong>Shard objetivo</strong> en GB, <strong>Rollover</strong> en días.
+                        La <strong>cantidad de shards</strong> se calcula automáticamente y se ve en tabs Tiers/Nodos.
+                      </p>
+                    } @else {
+                      <p class="tier-help">
+                        Activa solo los tiers que usarás (ej: Hot + Cold) y define días de retención por cada uno.
+                      </p>
+                    }
+                    @for (tier of tiers; track tier) {
+                      <div class="tier-item">
+                        <h4>{{ tierLabel(tier) }}</h4>
+                        <p class="field-hint">{{ tierGuidanceLabel(tier) }}</p>
+                        @if (uiMode() === 'simple') {
+                          <div class="mini-grid two-col">
+                            <mat-form-field appearance="outline">
+                              <mat-label>Tier activo</mat-label>
+                              <mat-select [ngModel]="tierEnabled(dataset, tier)" (ngModelChange)="setTierEnabled(dataset, tier, $event)">
+                                <mat-option [value]="true">Sí</mat-option>
+                                <mat-option [value]="false">No</mat-option>
+                              </mat-select>
+                            </mat-form-field>
+                            <mat-form-field appearance="outline">
+                              <mat-label>Retención (días)</mat-label>
+                              <input
+                                matInput
+                                type="number"
+                                step="1"
+                                [disabled]="!tierEnabled(dataset, tier)"
+                                [ngModel]="dataset.retentionDaysByTier[tier]"
+                                (ngModelChange)="dataset.retentionDaysByTier[tier] = +$event; markDirty()"
+                              />
+                            </mat-form-field>
+                          </div>
+                        } @else {
+                          <div class="mini-grid four-col">
+                            <mat-form-field appearance="outline">
+                              <mat-label>Retención (días)</mat-label>
+                              <input
+                                matInput
+                                type="number"
+                                step="1"
+                                [ngModel]="dataset.retentionDaysByTier[tier]"
+                                (ngModelChange)="dataset.retentionDaysByTier[tier] = +$event; markDirty()"
+                              />
+                            </mat-form-field>
+                            <mat-form-field appearance="outline">
+                              <mat-label>{{ tier === 'frozen' ? 'Réplicas (#, frozen=0)' : 'Réplicas (#)' }}</mat-label>
+                              <input
+                                matInput
+                                type="number"
+                                step="1"
+                                [disabled]="tier === 'frozen'"
+                                [ngModel]="dataset.replicasByTier[tier]"
+                                (ngModelChange)="dataset.replicasByTier[tier] = +$event; markDirty()"
+                              />
+                            </mat-form-field>
+                            <mat-form-field appearance="outline">
+                              <mat-label>Shard objetivo (GB)</mat-label>
+                              <input
+                                matInput
+                                type="number"
+                                step="1"
+                                [ngModel]="dataset.targetShardSizeGbByTier[tier]"
+                                (ngModelChange)="dataset.targetShardSizeGbByTier[tier] = +$event; markDirty()"
+                              />
+                            </mat-form-field>
+                            <mat-form-field appearance="outline">
+                              <mat-label>Rollover (días)</mat-label>
+                              <input
+                                matInput
+                                type="number"
+                                step="1"
+                                [ngModel]="dataset.rolloverDaysByTier[tier]"
+                                (ngModelChange)="dataset.rolloverDaysByTier[tier] = +$event; markDirty()"
+                              />
+                            </mat-form-field>
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                </mat-card>
+              }
+              </mat-card>
+            }
+          </div>
+        } @else {
+          <p class="field-hint strong">Modo capacidad máxima activo: el cálculo inverso se hace sin comparar contra el workload actual.</p>
+        }
+      }
+    </div>
+  </mat-sidenav>
+
+  <mat-sidenav-content>
+    <mat-toolbar class="main-toolbar">
+      @if (isCompact()) {
+        <button mat-icon-button type="button" class="menu-btn" (click)="toggleSidebar()">
+          <mat-icon>menu</mat-icon>
+        </button>
+      }
+      <span>Elastic Sizing Next</span>
+      <span class="spacer"></span>
+      <mat-form-field appearance="outline" class="unit-select">
+        <mat-label>Storage</mat-label>
+        <mat-select [ngModel]="storageUnit()" (ngModelChange)="setStorageUnit($event)">
+          <mat-option value="auto">Auto</mat-option>
+          <mat-option value="GB">GB</mat-option>
+          <mat-option value="TB">TB</mat-option>
+          <mat-option value="PB">PB</mat-option>
+        </mat-select>
+      </mat-form-field>
+      <button mat-stroked-button type="button" (click)="resetWithSample()">Restaurar sample</button>
+    </mat-toolbar>
+
+    <div class="main-content">
+      @if (selectedResult(); as result) {
+        <mat-tab-group class="result-tabs">
+          <mat-tab label="Resumen">
+            <p class="unit-hint">Unidad base de cálculo: GB decimales (1 TB = 1.000 GB, 1 PB = 1.000.000 GB).</p>
+            <section class="cards-grid top-metrics">
+              <mat-card class="summary-card">
+                <h3>Storage total</h3>
+                <p class="metric-value">{{ formatStorage(result.totals.totalStorageGb) }}</p>
+                <p class="raw-hint">{{ formatRawGb(result.totals.totalStorageGb) }}</p>
+              </mat-card>
+              <mat-card class="summary-card">
+                <h3>Ingesta total</h3>
+                <p class="metric-value">{{ formatCount(result.totals.totalEps) }} EPS</p>
+              </mat-card>
+              <mat-card class="summary-card">
+                <h3>Shards primarios</h3>
+                <p class="metric-value">{{ formatCount(primaryShardsFromResult(result)) }}</p>
+              </mat-card>
+              <mat-card class="summary-card">
+                <h3>Shards totales</h3>
+                <p class="metric-value">{{ formatCount(result.totals.totalShards) }}</p>
+              </mat-card>
+              <mat-card class="summary-card">
+                <h3>Data nodes</h3>
+                <p class="metric-value">{{ formatCount(result.totals.dataNodes) }}</p>
+              </mat-card>
+              <mat-card class="summary-card">
+                <h3>Masters dedicados</h3>
+                <p class="metric-value">{{ formatCount(result.totals.dedicatedMasters) }}</p>
+              </mat-card>
+            </section>
+
+            <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(540px,1fr));gap:0.85rem;margin:0 1rem 1rem;align-items:start;">
+              <div style="display:grid;gap:0.85rem;min-width:0;">
+                @if (selectedSourcesTotals() || deploymentPlan()) {
+                  <section class="summary-secondary-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0.85rem;margin:0;align-items:start;">
+                    @if (selectedSourcesTotals(); as sourceTotals) {
+                      <mat-card class="comparison-card" style="margin:0;">
+                        <h3>Fuentes típicas (presets)</h3>
+                        <p>EPS total: <strong>{{ formatPresetNumber(sourceTotals.totals.totalEps, 1) }}</strong> (rango {{ formatPresetNumber(sourceTotals.totals.totalEpsMin, 1) }} - {{ formatPresetNumber(sourceTotals.totals.totalEpsMax, 1) }})</p>
+                        <p>{{ sourceTotals.totals.unitLabel }}/h: <strong>{{ formatPresetNumber(sourceTotals.totals.totalGbPerHour, 3) }}</strong> | {{ sourceTotals.totals.unitLabel }}/d: <strong>{{ formatPresetNumber(sourceTotals.totals.totalGbPerDay, 3) }}</strong></p>
+                        @if (sourceTotals.items.length > 0) {
+                          <div class="source-contrib-list compact" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.2rem 0.65rem;max-height:7.2rem;overflow:auto;margin-top:0.35rem;">
+                            @for (item of sourceTotals.items; track item.itemId) {
+                              <p style="margin:0;display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;font-size:0.78rem;">
+                                <span>{{ item.sourceName }}</span>
+                                <strong>{{ formatPresetNumber(item.contributionPct, 1) }}%</strong>
+                              </p>
+                            }
+                          </div>
+                        }
+                      </mat-card>
+                    }
+
+                    @if (deploymentPlan(); as deploy) {
+                      <mat-card class="comparison-card" style="margin:0;">
+                        <h3>Plan de Clusters/Nodos</h3>
+                        <p>Plan: {{ formatCount(deploy.clusters) }} x {{ formatCount(deploy.plannedPerCluster) }} = {{ formatCount(deploy.plannedTotal) }} nodos</p>
+                        <p>Cálculo recomendado: {{ formatCount(deploy.recommendedTotal) }} ({{ formatCount(deploy.recommendedPerCluster) }} por cluster)</p>
+                        <div class="chips-row">
+                          <mat-chip>Diferencia: {{ formatDelta(deploy.deltaNodes, 'nodos') }}</mat-chip>
+                        </div>
+                      </mat-card>
+                    }
+                  </section>
+                }
+
+                <section class="cards-grid" style="margin:0;">
+                  @for (workload of result.workloads; track workload.workloadId) {
+                    <mat-card class="workload-summary">
+                      <h3>{{ workload.workloadName }}</h3>
+                      <p class="metric-value">{{ formatStorage(workload.totalStorageGb) }}</p>
+                      <p>{{ formatCount(workload.totalShards) }} shards</p>
+                      <p>{{ workload.datasets.length }} entradas tierizadas</p>
+                    </mat-card>
+                  }
+                </section>
+              </div>
+
+              @if (selectedScenario(); as scenario) {
+                @if (machineCapacityCheck(); as machine) {
+                  <mat-card class="comparison-card capacity-result-card" style="margin:0;position:sticky;top:0.6rem;">
+                    <h3>Capacity Result</h3>
+                    <div style="display:grid;grid-template-columns:1fr;gap:0.35rem;padding:0.45rem 0.55rem;border:1px solid #dbe4ef;border-radius:10px;background:#f8fbff;">
+                      <p style="margin:0;"><strong>Verdict:</strong> {{ capacityVerdict(machine, scenario) }}</p>
+                      <p style="margin:0;"><strong>Bottleneck:</strong> {{ capacityPrimaryBottleneck(machine, scenario) }}</p>
+                      <p style="margin:0;"><strong>Delta needed:</strong> {{ capacityDeltaSummary(machine, scenario) }}</p>
+                    </div>
+
+                    @if (scenario.sizingApproach === 'normal') {
+                      <p class="field-hint" style="margin-top:0.45rem;">Interpretación: workload -> spec de capacidad sostenible (mínimo + margen).</p>
+                      <div style="overflow:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+                          <thead>
+                            <tr style="text-align:left;border-bottom:1px solid #dbe4ef;">
+                              <th style="padding:0.28rem 0.38rem;">Recurso</th>
+                              <th style="padding:0.28rem 0.38rem;">Requerido (mín.)</th>
+                              <th style="padding:0.28rem 0.38rem;">Recomendado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">Nodes</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.specTargets.minimum.nodes) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.specTargets.recommended.nodes) }}</td>
+                            </tr>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">CPU</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.specTargets.minimum.totalCpuCores) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.specTargets.recommended.totalCpuCores) }}</td>
+                            </tr>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">RAM (GB)</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.specTargets.minimum.totalRamGb) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.specTargets.recommended.totalRamGb) }}</td>
+                            </tr>
+                            <tr>
+                              <td style="padding:0.28rem 0.38rem;">Disk</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatStorage(machine.specTargets.minimum.totalDiskGbUsable) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatStorage(machine.specTargets.recommended.totalDiskGbUsable) }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div style="margin-top:0.45rem;padding:0.42rem 0.52rem;border:1px solid #dbe4ef;border-radius:10px;background:#fff;">
+                        <p style="margin:0.15rem 0;"><strong>Spec objetivo (total cluster):</strong> {{ formatSpecSummaryForScenario(scenario, machine.specTargets.minimum.nodes, machine.specTargets.minimum.totalCpuCores, machine.specTargets.minimum.totalRamGb, machine.specTargets.minimum.totalDiskGbUsable) }}</p>
+                        <p style="margin:0.15rem 0;"><strong>Spec con margen:</strong> {{ formatSpecSummaryForScenario(scenario, machine.specTargets.recommended.nodes, machine.specTargets.recommended.totalCpuCores, machine.specTargets.recommended.totalRamGb, machine.specTargets.recommended.totalDiskGbUsable) }}</p>
+                        <p style="margin:0.15rem 0;">Nota: esto es capacidad sostenible bajo carga, no mínimo para que el servicio simplemente arranque.</p>
+                      </div>
+                    } @else {
+                      <p class="field-hint" style="margin-top:0.45rem;">Interpretación: requerimientos del workload vs capacidad disponible de la máquina.</p>
+                      @if (machine.demand.noIngestDemand) {
+                        <p class="field-hint" style="margin-top:0.25rem;">Sin ingesta configurada (EPS/GB en 0): este chequeo es parcial y no representa carga real.</p>
+                      }
+                      <div style="overflow:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+                          <thead>
+                            <tr style="text-align:left;border-bottom:1px solid #dbe4ef;">
+                              <th style="padding:0.28rem 0.38rem;">Recurso</th>
+                              <th style="padding:0.28rem 0.38rem;">Mínimo requerido</th>
+                              <th style="padding:0.28rem 0.38rem;">Disponible (máquina)</th>
+                              <th style="padding:0.28rem 0.38rem;">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">CPU</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? '--' : formatPresetNumber(machine.demand.totalCpuCores, 1) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatPresetNumber(machine.capacity.totalCpuCoresForElastic, 1) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? 'N/A' : capacityResourceStatus(machine.demand.totalCpuCores, machine.capacity.totalCpuCoresForElastic) }}</td>
+                            </tr>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">RAM (GB)</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? '--' : formatPresetNumber(machine.demand.totalRamGb, 1) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatPresetNumber(machine.capacity.totalRamGbForElastic, 1) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? 'N/A' : capacityResourceStatus(machine.demand.totalRamGb, machine.capacity.totalRamGbForElastic) }}</td>
+                            </tr>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">Disk</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? '--' : formatStorage(machine.demand.storageGb) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatStorage(machine.capacity.usableStorageGb) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? 'N/A' : capacityResourceStatus(machine.demand.storageGb, machine.capacity.usableStorageGb) }}</td>
+                            </tr>
+                            <tr style="border-bottom:1px dashed #e6edf6;">
+                              <td style="padding:0.28rem 0.38rem;">Shards</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? '--' : formatCount(machine.demand.totalShards) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.capacity.maxShards) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? 'N/A' : capacityResourceStatus(machine.demand.totalShards, machine.capacity.maxShards) }}</td>
+                            </tr>
+                            <tr>
+                              <td style="padding:0.28rem 0.38rem;">EPS</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? '--' : formatCount(machine.demand.totalEps) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ formatCount(machine.capacity.maxEps) }}</td>
+                              <td style="padding:0.28rem 0.38rem;">{{ scenario.capacityCheck.compareAgainstWorkload === false ? 'N/A' : capacityResourceStatus(machine.demand.totalEps, machine.capacity.maxEps) }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div style="margin-top:0.45rem;padding:0.42rem 0.52rem;border:1px solid #dbe4ef;border-radius:10px;background:#fff;">
+                        <p style="margin:0.15rem 0;"><strong>Spec para pasar (total cluster):</strong> {{ formatSpecSummaryForScenario(scenario, machine.specTargets.minimum.nodes, machine.specTargets.minimum.totalCpuCores, machine.specTargets.minimum.totalRamGb, machine.specTargets.minimum.totalDiskGbUsable) }}</p>
+                        <p style="margin:0.15rem 0;"><strong>Spec con margen:</strong> {{ formatSpecSummaryForScenario(scenario, machine.specTargets.recommended.nodes, machine.specTargets.recommended.totalCpuCores, machine.specTargets.recommended.totalRamGb, machine.specTargets.recommended.totalDiskGbUsable) }}</p>
+                        <p style="margin:0.15rem 0;"><strong>Max sustainable:</strong> {{ formatCount(machine.inverse.maxEps) }} EPS (~{{ formatPresetNumber(machine.inverse.maxGbPerHour, 3) }} GB/h)</p>
+                        <p style="margin:0.15rem 0;">Nota: esto es capacidad sostenible bajo carga, no mínimo para arranque del servicio.</p>
+                      </div>
+                    }
+
+                    <details style="margin-top:0.45rem;">
+                      <summary style="cursor:pointer;font-weight:700;">Calculation assumptions</summary>
+                      <div style="margin-top:0.35rem;padding:0.35rem 0.45rem;border:1px solid #dbe4ef;border-radius:8px;background:#f8fbff;">
+                        <p style="margin:0.15rem 0;">OS reserve per node: {{ machine.systemOverhead.reservedCpuCoresPerNode | number:'1.1-1' }} vCPU, {{ machine.systemOverhead.reservedRamGbPerNode | number:'1.0-1' }} GB RAM, {{ machine.systemOverhead.reservedDiskGbPerNode | number:'1.0-1' }} GB disk.</p>
+                        @if (machine.dockerOverhead.enabled) {
+                          <p style="margin:0.15rem 0;">Docker reserve: {{ machine.dockerOverhead.reservedCpuCores | number:'1.1-1' }} vCPU, {{ machine.dockerOverhead.reservedRamGb | number:'1.0-1' }} GB RAM, {{ machine.dockerOverhead.reservedDiskGb | number:'1.0-1' }} GB disk.</p>
+                        }
+                        <p style="margin:0.15rem 0;">Overheads: index {{ formatPresetNumber(scenario.overhead.indexOverheadFactor, 2) }}, headroom {{ formatPresetNumber(scenario.overhead.headroomFactor, 2) }}, disk usable {{ formatPresetNumber(scenario.overhead.diskUsableFactor, 2) }}.</p>
+                        <p style="margin:0.15rem 0;">Archive/compression: mode {{ scenario.archiveCompression.mode }}, compression {{ formatPresetNumber(scenario.archiveCompression.compressionFactor, 2) }}, index factor {{ formatPresetNumber(scenario.archiveCompression.indexOverheadFactor, 2) }}.</p>
+                        <p style="margin:0.15rem 0;">Shard policy: {{ scenario.manualShardPlan.enabled ? 'manual' : 'auto' }}.</p>
+                      </div>
+                    </details>
+                  </mat-card>
+                }
+              }
+            </section>
+          </mat-tab>
+
+          <mat-tab label="Tiers">
+            <p class="unit-hint">
+              Tiers muestra cómo se reparte capacidad entre Hot/Warm/Cold/Frozen.
+              Si Archivado/Compresión está activo en sizing, verás su aporte en Hot y Frozen.
+            </p>
+            <section class="cards-grid">
+              @for (tier of result.tiers; track tier.tier) {
+                <mat-card class="tier-summary">
+                  <h3>{{ tierLabel(tier.tier) }}</h3>
+                  <p>Total: {{ formatStorage(tier.totalStorageGb) }}</p>
+                  <p>Primarios: {{ formatCount(tier.primaryShards) }} | Totales: {{ formatCount(tier.totalShards) }}</p>
+                  <p>Nodos por storage (referencia): {{ formatCount(tier.nodesByStorage) }}</p>
+                  <p>Nodos por shards target: {{ formatCount(tier.nodesByShardsHeap) }}</p>
+                  <p>Nodos tier (final): {{ formatCount(tier.nodesRecommended) }}</p>
+                  @if (archiveTierContributionNote(tier.tier); as archiveNote) {
+                    <p class="tier-archive-note">{{ archiveNote }}</p>
+                  }
+                </mat-card>
+              }
+            </section>
+          </mat-tab>
+
+          <mat-tab label="Nodos">
+            <section class="node-controls">
+              <p class="field-hint strong node-architecture-note">
+                “Nodos en warm/cold/frozen no se calculan por igualar hot. Se dimensionan por consultas históricas, caché y latencia al repositorio. En modo simple debes definirlos manualmente.”
+              </p>
+              <mat-form-field appearance="outline">
+                <mat-label>Vista de nodos</mat-label>
+                <mat-select [ngModel]="nodePlanViewMode()" (ngModelChange)="setNodePlanViewMode($event)">
+                  <mat-option value="recommended">Recomendados por cálculo</mat-option>
+                  <mat-option value="deployment">Configurados (clusters x nodos)</mat-option>
+                </mat-select>
+              </mat-form-field>
+              @if (selectedScenario(); as scenario) {
+                <p class="field-hint">
+                  Configuración actual: {{ formatCount(scenario.deployment.clusterCount) }} cluster(s) x
+                  {{ formatCount(scenario.deployment.fixedDataNodesPerCluster) }} nodo(s) =
+                  {{ formatCount(scenario.deployment.clusterCount * scenario.deployment.fixedDataNodesPerCluster) }} nodo(s) data.
+                </p>
+              }
+            </section>
+
+            @if (activeNodePlan().length === 0) {
+              <mat-card>
+                <p>No hay node plan porque no existen tiers con datos.</p>
+              </mat-card>
+            } @else {
+              @for (plan of activeNodePlan(); track plan.tier) {
+                <section class="tier-plan">
+                  <h3>{{ tierLabel(plan.tier) }}</h3>
+                  @for (cluster of nodeGroupsByCluster(plan); track cluster.clusterIndex) {
+                    <mat-card class="cluster-card" [class.single-node-cluster]="cluster.nodes.length === 1">
+                      <div class="cluster-header">
+                        <h4>{{ clusterLabel(cluster.clusterIndex) }}</h4>
+                        <div class="cluster-kpis">
+                          <span>shards: {{ formatCount(cluster.primaries) }}</span>
+                          <span>replicas: {{ formatCount(cluster.replicas) }}</span>
+                          <span>{{ formatStorage(clusterEstimatedStorageGb(cluster, plan.tier)) }}</span>
+                        </div>
+                      </div>
+
+                      <div class="cards-grid cluster-node-grid" [class.single-node-grid]="cluster.nodes.length === 1">
+                        @for (node of cluster.nodes; track node.nodeName) {
+                          <mat-card class="node-card node-visual-card">
+                            <div class="node-visual-header">{{ nodeDisplayName(node.nodeName) }}</div>
+                            <div class="node-visual-kpis">
+                              <span class="pill pill-cyan">P: {{ formatCount(node.primaries) }}</span>
+                              <span class="pill pill-red">R: {{ formatCount(node.replicas) }}</span>
+                              <span class="pill pill-dark">Total: {{ formatCount(node.totalShards) }}</span>
+                              <span class="pill pill-yellow">{{ formatStorage(nodeEstimatedStorageGb(node, plan.tier)) }}</span>
+                            </div>
+
+                            <div class="node-visual-body">
+                              <div class="shard-panel">
+                                <h5>primary shards</h5>
+                                <p>{{ formatCount(node.primaries) }} shard(s)</p>
+                                <p>{{ formatStorage(node.primaries * tierAvgPrimaryShardSizeGb(plan.tier)) }}</p>
+                                @if (shardSizeAdvice(tierAvgPrimaryShardSizeGb(plan.tier)); as advice) {
+                                  <div class="size-advice">{{ advice }}</div>
+                                }
+                              </div>
+
+                              <div class="shard-panel">
+                                <h5>replica shards</h5>
+                                <p>{{ formatCount(node.replicas) }} replica(s)</p>
+                                <p>{{ formatStorage(node.replicas * tierAvgPrimaryShardSizeGb(plan.tier)) }}</p>
+                              </div>
+                            </div>
+
+                            <div class="node-visual-footer">{{ nodeDisplayName(node.nodeName) }}</div>
+                          </mat-card>
+                        }
+                      </div>
+                    </mat-card>
+                  }
+                </section>
+              }
+            }
+          </mat-tab>
+
+          <mat-tab label="Archivado">
+            @if (selectedScenario(); as scenario) {
+              @if (archiveSizing(); as archive) {
+                <section class="archive-results-section">
+                  <mat-card class="archive-hero-card">
+                    <h3>Archivado/Compresión</h3>
+                    <p>
+                      Estado en sizing principal:
+                      <strong>{{ scenario.archiveCompression.includeInSizing ? 'Activo (impacta Workloads/Tiers/Nodos/Máquina)' : 'Solo referencia (no impacta sizing principal)' }}</strong>
+                    </p>
+                    <p>Modo: <strong>{{ archive.inputs.mode === 'indexed_to_archive' ? 'indexed → archive' : 'raw → archive' }}</strong> | Unidad: <strong>{{ archiveUnitLabel(archive.inputs.unit_system) }}</strong></p>
+                  </mat-card>
+
+                  <section class="cards-grid archive-metrics-grid">
+                    <mat-card class="summary-card">
+                      <h3>Raw {{ archiveUnitLabel(archive.inputs.unit_system) }}/hora</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.rates.raw_gb_per_hour) }}</p>
+                    </mat-card>
+                    <mat-card class="summary-card">
+                      <h3>Raw {{ archiveUnitLabel(archive.inputs.unit_system) }}/día</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.rates.raw_gb_per_day) }}</p>
+                    </mat-card>
+                    <mat-card class="summary-card">
+                      <h3>Raw {{ archiveUnitLabel(archive.inputs.unit_system) }}/mes</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.rates.raw_gb_per_month) }}</p>
+                    </mat-card>
+                    <mat-card class="summary-card">
+                      <h3>Indexed {{ archiveUnitLabel(archive.inputs.unit_system) }}/día</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.rates.indexed_gb_per_day) }}</p>
+                    </mat-card>
+                    <mat-card class="summary-card">
+                      <h3>Archive {{ archiveUnitLabel(archive.inputs.unit_system) }}/día</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.rates.archive_gb_per_day) }}</p>
+                    </mat-card>
+                  </section>
+
+                  <section class="cards-grid archive-metrics-grid">
+                    <mat-card class="summary-card">
+                      <h3>Online total</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.totals.online_total_gb) }} {{ archiveUnitLabel(archive.inputs.unit_system) }}</p>
+                    </mat-card>
+                    <mat-card class="summary-card">
+                      <h3>Archivado total</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.totals.archive_total_gb) }} {{ archiveUnitLabel(archive.inputs.unit_system) }}</p>
+                    </mat-card>
+                    <mat-card class="summary-card">
+                      <h3>Total retenido</h3>
+                      <p class="metric-value">{{ formatArchiveValue(archive.totals.total_retained_gb) }} {{ archiveUnitLabel(archive.inputs.unit_system) }}</p>
+                    </mat-card>
+                  </section>
+
+                  @if (archive.warnings.length > 0) {
+                    <section class="warnings-list">
+                      @for (warning of archive.warnings; track warning) {
+                        <mat-card class="warning-card warning">
+                          <h4>WARNING · ARCHIVE</h4>
+                          <p>{{ warning }}</p>
+                        </mat-card>
+                      }
+                    </section>
+                  }
+
+                  <mat-card class="json-card archive-json-card">
+                    <h3>Salida JSON (Archivado/Compresión)</h3>
+                    <mat-form-field appearance="outline" class="full-width">
+                      <textarea matInput rows="16" [value]="archiveSizingJson()" readonly></textarea>
+                    </mat-form-field>
+                  </mat-card>
+                </section>
+              }
+            }
+          </mat-tab>
+
+          <mat-tab label="Fuentes típicas">
+            @if (selectedScenario(); as scenario) {
+              <section class="presets-panel">
+                <p class="field-hint strong preset-disclaimer">
+                  Valores aproximados: el logging level y las policies pueden cambiar significativamente el EPS real.
+                </p>
+                @if (presetActionMessage()) {
+                  <p class="preset-action-feedback">{{ presetActionMessage() }}</p>
+                }
+
+                <div class="mini-grid two-col preset-controls">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Buscar fuente</mat-label>
+                    <input
+                      matInput
+                      [ngModel]="presetsSearch()"
+                      (ngModelChange)="setPresetsSearch($event)"
+                      placeholder="vendor, producto, tag..."
+                    />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Categoría</mat-label>
+                    <mat-select [ngModel]="presetsCategoryFilter()" (ngModelChange)="setPresetsCategoryFilter($event)">
+                      <mat-option value="all">Todas</mat-option>
+                      @for (category of presetCategories(); track category) {
+                        <mat-option [value]="category">{{ category }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Vendor</mat-label>
+                    <mat-select [ngModel]="presetsVendorFilter()" (ngModelChange)="setPresetsVendorFilter($event)">
+                      <mat-option value="all">Todos</mat-option>
+                      @for (vendor of presetVendors(); track vendor) {
+                        <mat-option [value]="vendor">{{ vendor }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Unidad base</mat-label>
+                    <mat-select [ngModel]="scenario.presetSources.unitSystem" (ngModelChange)="setPresetSourcesUnitSystem(scenario, $event)">
+                      <mat-option value="GB10">GB (10^9)</mat-option>
+                      <mat-option value="GiB2">GiB (2^30)</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Modo edición</mat-label>
+                    <mat-select [ngModel]="scenario.presetSources.advancedMode" (ngModelChange)="togglePresetSourcesAdvancedMode(scenario, $event)">
+                      <mat-option [value]="false">Simple</mat-option>
+                      <mat-option [value]="true">Avanzado (overrides)</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <div class="preset-workspace">
+                  <mat-card class="preset-catalog-card">
+                    <h3>Catálogo interno ({{ scenario.presetSources.catalogVersion }})</h3>
+                    @if (filteredPresetCatalog().length === 0) {
+                      <p>No hay presets disponibles con esos filtros o ya están agregados.</p>
+                    } @else {
+                      <div class="preset-catalog-list">
+                        @for (preset of filteredPresetCatalog(); track preset.id) {
+                          <mat-card class="preset-catalog-item">
+                            <div>
+                              <p class="preset-title">{{ preset.vendor }} {{ preset.product }}</p>
+                              <p class="preset-meta">{{ preset.category }} · unidad: {{ unitTypeDescription(preset.unitType) }}</p>
+                              <p class="preset-meta">EPS típico/unidad: {{ formatPresetNumber(preset.defaultEpsPerUnit, 2) }} ({{ formatPresetNumber(preset.epsRange.min, 2) }} - {{ formatPresetNumber(preset.epsRange.max, 2) }})</p>
+                              <p class="preset-meta">avg bytes: {{ formatPresetNumber(preset.avgEventBytes, 0) }}</p>
+                              <p class="preset-note">{{ preset.notes }}</p>
+                            </div>
+                            <button mat-stroked-button type="button" (click)="addPresetSource(scenario, preset.id)">Agregar</button>
+                          </mat-card>
+                        }
+                      </div>
+                    }
+                  </mat-card>
+
+                  @if (selectedSourcesTotals(); as sourceTotals) {
+                    <mat-card class="preset-selected-card">
+                      <h3>Fuentes seleccionadas</h3>
+                      @if (sourceTotals.items.length === 0) {
+                        <p>No hay fuentes seleccionadas.</p>
+                      } @else {
+                        <div class="preset-table">
+                          <div class="preset-table-header">
+                            <span>Fuente</span>
+                            <span>Unidad</span>
+                            <span>Cantidad</span>
+                            <span>EPS típico/rango</span>
+                            <span>avg bytes</span>
+                            <span>EPS item</span>
+                            <span>{{ sourceTotals.totals.unitLabel }}/h</span>
+                            <span>{{ sourceTotals.totals.unitLabel }}/d</span>
+                            <span>Contrib.</span>
+                            <span>Acciones</span>
+                          </div>
+                          @for (item of sourceTotals.items; track item.itemId) {
+                            <div class="preset-table-row" [class.unknown-preset-row]="!item.knownPreset">
+                              <span>{{ item.sourceName }}</span>
+                              <span>{{ unitTypeDescription(item.unitType) }}</span>
+                              <span>
+                                <mat-form-field appearance="outline" class="inline-field">
+                                  <mat-label>{{ sourceUnitInputLabel(item.unitType) }}</mat-label>
+                                  <input
+                                    matInput
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    [ngModel]="item.quantity"
+                                    (ngModelChange)="updatePresetSourceQuantity(scenario, item.itemId, $event)"
+                                  />
+                                </mat-form-field>
+                              </span>
+                              <span>{{ formatPresetNumber(item.defaultEpsPerUnit, 2) }} ({{ formatPresetNumber(item.epsRange.min, 2) }} - {{ formatPresetNumber(item.epsRange.max, 2) }})</span>
+                              <span>
+                                @if (scenario.presetSources.advancedMode && item.knownPreset) {
+                                  <div class="advanced-inline">
+                                    <mat-form-field appearance="outline" class="inline-field">
+                                      <mat-label>bytes</mat-label>
+                                      <input
+                                        matInput
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        [ngModel]="selectedSourceOverrideAvgEventBytes(scenario, item.itemId) ?? item.avgEventBytes"
+                                        (ngModelChange)="setPresetSourceAvgEventBytes(scenario, item.itemId, $event)"
+                                      />
+                                    </mat-form-field>
+                                    <mat-form-field appearance="outline" class="inline-field">
+                                      <mat-label>eps/u</mat-label>
+                                      <input
+                                        matInput
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        [ngModel]="selectedSourceOverrideDefaultEpsPerUnit(scenario, item.itemId) ?? item.defaultEpsPerUnit"
+                                        (ngModelChange)="setPresetSourceDefaultEpsPerUnit(scenario, item.itemId, $event)"
+                                      />
+                                    </mat-form-field>
+                                  </div>
+                                } @else {
+                                  {{ formatPresetNumber(item.avgEventBytes, 0) }}
+                                }
+                              </span>
+                              <span>{{ formatPresetNumber(item.epsTypical, 2) }}<br /><small>{{ formatPresetNumber(item.epsMin, 2) }} - {{ formatPresetNumber(item.epsMax, 2) }}</small></span>
+                              <span>{{ formatPresetNumber(item.gbPerHourTypical, 3) }}</span>
+                              <span>{{ formatPresetNumber(item.gbPerDayTypical, 3) }}<br /><small>{{ formatPresetNumber(item.gbPerDayMin, 3) }} - {{ formatPresetNumber(item.gbPerDayMax, 3) }}</small></span>
+                              <span>{{ formatPresetNumber(item.contributionPct, 1) }}%</span>
+                              <span>
+                                <button mat-button type="button" (click)="removePresetSource(scenario, item.itemId)">Eliminar</button>
+                              </span>
+                            </div>
+                          }
+                        </div>
+                      }
+
+                      <div class="preset-totals">
+                        <p><strong>Total EPS:</strong> {{ formatPresetNumber(sourceTotals.totals.totalEps, 1) }} ({{ formatPresetNumber(sourceTotals.totals.totalEpsMin, 1) }} - {{ formatPresetNumber(sourceTotals.totals.totalEpsMax, 1) }})</p>
+                        <p><strong>Total {{ sourceTotals.totals.unitLabel }}/hora:</strong> {{ formatPresetNumber(sourceTotals.totals.totalGbPerHour, 3) }}</p>
+                        <p><strong>Total {{ sourceTotals.totals.unitLabel }}/día:</strong> {{ formatPresetNumber(sourceTotals.totals.totalGbPerDay, 3) }} ({{ formatPresetNumber(sourceTotals.totals.totalGbPerDayMin, 3) }} - {{ formatPresetNumber(sourceTotals.totals.totalGbPerDayMax, 3) }})</p>
+                      </div>
+
+                      @if (sourceTotals.warnings.length > 0) {
+                        <div class="preset-warning-list">
+                          @for (warning of sourceTotals.warnings; track warning) {
+                            <p class="preset-warning-item">{{ warning }}</p>
+                          }
+                        </div>
+                      }
+                    </mat-card>
+                  }
+                </div>
+              </section>
+            }
+          </mat-tab>
+
+          <mat-tab label="Warnings">
+            @if (result.warnings.length === 0) {
+              <mat-card>
+                <p>Sin warnings activos.</p>
+              </mat-card>
+            } @else {
+              <section class="warnings-list">
+                @for (warning of result.warnings; track warning.code + warning.message) {
+                  <mat-card [class]="'warning-card ' + warning.level">
+                    <h4>{{ warning.level | uppercase }} · {{ warning.code }}</h4>
+                    <p>{{ warning.message }}</p>
+                  </mat-card>
+                }
+              </section>
+            }
+            @if (selectedSourcesTotals(); as sourceTotals) {
+              @if (sourceTotals.warnings.length > 0) {
+                <section class="warnings-list">
+                  @for (warning of sourceTotals.warnings; track warning) {
+                    <mat-card class="warning-card warning">
+                      <h4>WARNING · PRESET_SOURCES</h4>
+                      <p>{{ warning }}</p>
+                    </mat-card>
+                  }
+                </section>
+              }
+            }
+          </mat-tab>
+
+          <mat-tab label="Export/Import JSON">
+            <section class="json-panels">
+              <mat-card class="json-card">
+                <h3>Export JSON</h3>
+                <mat-form-field appearance="outline" class="full-width">
+                  <textarea matInput rows="16" [value]="exportJson()" readonly></textarea>
+                </mat-form-field>
+                <button mat-flat-button type="button" (click)="downloadJson()">Descargar JSON</button>
+              </mat-card>
+
+              <mat-card class="json-card">
+                <h3>Export Elasticsearch API JSON (ILM + Template + Data Stream)</h3>
+                <mat-form-field appearance="outline" class="full-width">
+                  <textarea matInput rows="16" [value]="exportElasticsearchApiJson()" readonly></textarea>
+                </mat-form-field>
+              </mat-card>
+
+              <mat-card class="json-card">
+                <h3>Import JSON</h3>
+                <mat-form-field appearance="outline" class="full-width">
+                  <textarea
+                    matInput
+                    rows="16"
+                    [ngModel]="importJson()"
+                    (ngModelChange)="setImportJson($event)"
+                    placeholder="Pega aquí { project, scenarios } o solo [scenarios]"
+                  ></textarea>
+                </mat-form-field>
+                <div class="row-actions">
+                  <button mat-flat-button type="button" (click)="importFromJson()">Importar</button>
+                </div>
+                @if (importMessage()) {
+                  <p>{{ importMessage() }}</p>
+                }
+              </mat-card>
+            </section>
+          </mat-tab>
+        </mat-tab-group>
+      }
+    </div>
+  </mat-sidenav-content>
+</mat-sidenav-container>

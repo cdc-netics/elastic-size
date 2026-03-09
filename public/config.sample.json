@@ -1,0 +1,135 @@
+{
+  "project": {
+    "name": "elastic-sizing-next",
+    "purpose": "Capacity planning Elasticsearch/OpenSearch 2026 con ILM tiers, escenarios y export/import JSON",
+    "language": "es"
+  },
+  "scenarios": [
+    {
+      "id": "scn-exam-a",
+      "name": "Cluster A - Examen 1000 EPS",
+      "mode": "study",
+      "sizingApproach": "machine_requirements",
+      "deployment": {
+        "clusterCount": 1,
+        "fixedDataNodesPerCluster": 3,
+        "clusterLoadMode": "split"
+      },
+      "machineProfile": {
+        "cpuCoresPerNode": 12,
+        "ramGbPerNode": 16,
+        "diskGbPerNode": 500,
+        "diskType": "ssd",
+        "diskScope": "total_cluster"
+      },
+      "manualShardPlan": {
+        "enabled": true,
+        "primaryShardsPerCluster": 4,
+        "replicasPerPrimary": 1
+      },
+      "overhead": {
+        "indexOverheadFactor": 1.15,
+        "headroomFactor": 1.3,
+        "diskUsableFactor": 0.85
+      },
+      "constraints": {
+        "minDataNodesPerTier": 3,
+        "requireDedicatedMastersWhenDataNodesGt": 5,
+        "dedicatedMasters": 3,
+        "maxShardsPerNodePerHeapGb": 20,
+        "recommendedShardSizeGbRange": [10, 50]
+      },
+      "nodeProfiles": {
+        "hot": { "diskGb": 3000, "heapGb": 32 },
+        "warm": { "diskGb": 4000, "heapGb": 32 },
+        "cold": { "diskGb": 8000, "heapGb": 16 },
+        "frozen": { "diskGb": 12000, "heapGb": 16 }
+      },
+      "workloads": [
+        {
+          "id": "wl-exam-a",
+          "name": "Exam Workload A",
+          "datasets": [
+            {
+              "id": "ds-logs-a",
+              "name": "Logs 1000 EPS",
+              "kind": "logs",
+              "ingest": {
+                "mode": "eps_plus_avg_event_bytes",
+                "eps": 1000,
+                "avgEventBytes": 1000
+              },
+              "retentionDaysByTier": { "hot": 7, "warm": 0, "cold": 0, "frozen": 0 },
+              "replicasByTier": { "hot": 1, "warm": 0, "cold": 0, "frozen": 0 },
+              "targetShardSizeGbByTier": { "hot": 20, "warm": 30, "cold": 40, "frozen": 50 },
+              "rolloverDaysByTier": { "hot": 1, "warm": 1, "cold": 5, "frozen": 10 }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scn-exam-b",
+      "name": "Cluster B - Examen 3000 EPS",
+      "mode": "study",
+      "sizingApproach": "machine_requirements",
+      "deployment": {
+        "clusterCount": 1,
+        "fixedDataNodesPerCluster": 3,
+        "clusterLoadMode": "split"
+      },
+      "machineProfile": {
+        "cpuCoresPerNode": 12,
+        "ramGbPerNode": 16,
+        "diskGbPerNode": 500,
+        "diskType": "ssd",
+        "diskScope": "total_cluster"
+      },
+      "manualShardPlan": {
+        "enabled": true,
+        "primaryShardsPerCluster": 6,
+        "replicasPerPrimary": 1
+      },
+      "overhead": {
+        "indexOverheadFactor": 1.15,
+        "headroomFactor": 1.3,
+        "diskUsableFactor": 0.85
+      },
+      "constraints": {
+        "minDataNodesPerTier": 3,
+        "requireDedicatedMastersWhenDataNodesGt": 5,
+        "dedicatedMasters": 3,
+        "maxShardsPerNodePerHeapGb": 20,
+        "recommendedShardSizeGbRange": [10, 50]
+      },
+      "nodeProfiles": {
+        "hot": { "diskGb": 3000, "heapGb": 32 },
+        "warm": { "diskGb": 4000, "heapGb": 32 },
+        "cold": { "diskGb": 8000, "heapGb": 16 },
+        "frozen": { "diskGb": 12000, "heapGb": 16 }
+      },
+      "workloads": [
+        {
+          "id": "wl-exam-b",
+          "name": "Exam Workload B",
+          "datasets": [
+            {
+              "id": "ds-logs-b",
+              "name": "Logs 3000 EPS",
+              "kind": "logs",
+              "ingest": {
+                "mode": "eps_plus_avg_event_bytes",
+                "eps": 3000,
+                "avgEventBytes": 1000
+              },
+              "retentionDaysByTier": { "hot": 7, "warm": 0, "cold": 0, "frozen": 0 },
+              "replicasByTier": { "hot": 1, "warm": 0, "cold": 0, "frozen": 0 },
+              "targetShardSizeGbByTier": { "hot": 20, "warm": 30, "cold": 40, "frozen": 50 },
+              "rolloverDaysByTier": { "hot": 1, "warm": 1, "cold": 5, "frozen": 10 }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
