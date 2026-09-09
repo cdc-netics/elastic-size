@@ -5,7 +5,7 @@
 ![Angular](https://img.shields.io/badge/Angular-20-DD0031?logo=angular&logoColor=white)
 ![License](https://img.shields.io/badge/licencia-MIT-brightgreen)
 ![Contributions welcome](https://img.shields.io/badge/contributions-welcome-orange)
-
+<a href="https://www.buymeacoffee.com/athomo"><img src="https://img.buymeacoffee.com/button-api/?text=Comprame%20un%20cafecito&emoji=&slug=athomo&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
 ---
 
 ## 🆓 Uso libre
